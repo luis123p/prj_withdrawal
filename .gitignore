@@ -1,0 +1,12 @@
+# binarios
+prj_withdrawal
+prj_withdrawal.exe
+cajero
+*.exe
+# datos generados al usar la app
+data/transacciones.json
+data/*.tmp
+# editores / sistema
+.vscode/
+.idea/
+.DS_Store

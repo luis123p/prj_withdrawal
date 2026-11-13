@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cajero Web - prj_withdrawal</title>
+<link rel="stylesheet" href="estilos.css">
+</head>
+<body>
+<header class="barra">
+  <div class="marca">
+    <span class="logo">$</span>
+    <div>
+      <strong>Cajero Web</strong>
+      <small>prj_withdrawal v2.0 · Retiro · Abono · Transacciones</small>
+    </div>
+  </div>
+  <nav class="pestanas">
+    <button class="pestana activa" data-vista="cajero">Cajero</button>
+    <button class="pestana" data-vista="historial">Historial</button>
+    <button class="pestana" data-vista="bdd">Pruebas BDD</button>
+  </nav>
+</header>
+
+<main>
+  <!-- ===================== CAJERO ===================== -->
+  <section id="vista-cajero" class="vista activa">
+    <aside class="panel cuentas">
+      <h2>Cuentas</h2>
+      <ul id="lista-cuentas"></ul>
+      <details class="nueva">
+        <summary>+ Nueva cuenta</summary>
+        <form id="form-cuenta">
+          <input id="nc-titular" placeholder="Titular" maxlength="20" required>
+          <input id="nc-saldo" type="number" step="0.01" min="0" placeholder="Saldo inicial" required>
+          <button type="submit">Crear</button>
+          <p id="nc-msg" class="msg-chico"></p>
+        </form>
+      </details>
+    </aside>
+
+    <div class="col-principal">
+      <div class="panel saldo-card">
+        <p class="etiqueta">Titular</p>
+        <h1 id="titular-sel">-</h1>
+        <p class="etiqueta">Saldo disponible</p>
+        <p class="saldo" id="saldo-sel">S/ 0.00</p>
+      </div>
+
+      <form class="panel operacion" id="form-op">
+        <label for="monto">Monto</label>
+        <div class="fila-monto">
+          <span class="prefijo">S/</span>
+          <input id="monto" type="number" step="any" placeholder="0.00" inputmode="decimal" required>
+        </div>
+        <div class="rapidos">
+          <button type="button" data-m="20">20</button>
+          <button type="button" data-m="50">50</button>
+          <button type="button" data-m="100">100</button>
+          <button type="button" data-m="200">200</button>
+        </div>
+        <div class="botones">
+          <button type="submit" class="btn retiro" data-tipo="retiro">Retirar</button>
+          <button type="submit" class="btn abono" data-tipo="abono">Abonar</button>
+        </div>
+        <p class="ayuda">Límite de abono por operación: S/ 5,000.00 · Montos con hasta 2 decimales.</p>
+      </form>
+
+      <div id="resultado" class="resultado oculto"></div>
+
+      <div class="panel">
+        <h2>Últimos movimientos</h2>
+        <div class="tabla-scroll"><table id="tabla-recientes"></table></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== HISTORIAL ===================== -->
+  <section id="vista-historial" class="vista">
+    <div class="panel">
+      <div class="cab-historial">
+        <h2>Historial de transacciones (log JSON)</h2>
+        <select id="filtro-titular"><option value="">Todos los titulares</option></select>
+      </div>
+      <div class="resumen-estados" id="resumen-estados"></div>
+      <div class="tabla-scroll"><table id="tabla-historial"></table></div>
+    </div>
+  </section>
+
+  <!-- ===================== BDD ===================== -->
+  <section id="vista-bdd" class="vista">
+    <div class="panel">
+      <div class="cab-historial">
+        <h2>Pruebas BDD (features Gherkin)</h2>
+        <button id="btn-bdd" class="btn abono chico">Ejecutar pruebas</button>
+      </div>
+      <p class="ayuda">Se ejecutan los archivos <code>features/*.feature</code> en el servidor con el runner del proyecto.</p>
+      <div id="bdd-resumen"></div>
+      <div id="bdd-lista"></div>
+    </div>
+  </section>
+</main>
+
+<footer>Paucar Ventura, Luis Antonio · DSL - UNI FIIS · 2026</footer>
+<script src="app.js"></script>
+</body>
+</html>

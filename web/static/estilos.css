@@ -1,0 +1,179 @@
+:root {
+  --granate: #8b1e1e;
+  --granate-osc: #6d1616;
+  --azul: #1f4e79;
+  --azul-claro: #eaf1f8;
+  --verde: #2e7d32;
+  --verde-claro: #e3f2e5;
+  --naranja: #b26a00;
+  --naranja-claro: #fff3e0;
+  --rojo: #c62828;
+  --rojo-claro: #fdecea;
+  --fondo: #f3f5f8;
+  --panel: #ffffff;
+  --texto: #1f2328;
+  --suave: #5f6b7a;
+  --borde: #dde3ea;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+  background: var(--fondo);
+  color: var(--texto);
+  font-size: 15px;
+}
+button { font: inherit; cursor: pointer; }
+input, select { font: inherit; }
+code { font-family: Consolas, "DejaVu Sans Mono", monospace; font-size: 13px; }
+
+/* ---------- barra superior ---------- */
+.barra {
+  background: var(--granate);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 24px;
+  box-shadow: 0 2px 6px rgba(0,0,0,.15);
+}
+.marca { display: flex; align-items: center; gap: 12px; }
+.marca small { display: block; opacity: .8; font-size: 12px; }
+.marca strong { font-size: 18px; }
+.logo {
+  width: 38px; height: 38px; border-radius: 10px;
+  background: #fff; color: var(--granate);
+  display: grid; place-items: center; font-weight: 800; font-size: 22px;
+}
+.pestanas { display: flex; gap: 4px; }
+.pestana {
+  background: transparent; color: #fff; border: 0;
+  padding: 8px 14px; border-radius: 8px; opacity: .85;
+}
+.pestana:hover { background: rgba(255,255,255,.12); }
+.pestana.activa { background: #fff; color: var(--granate); opacity: 1; font-weight: 600; }
+
+/* ---------- layout ---------- */
+main { max-width: 1150px; margin: 22px auto; padding: 0 16px; }
+.vista { display: none; }
+.vista.activa { display: block; }
+#vista-cajero.activa { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 18px; align-items: start; }
+.col-principal { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--borde);
+  border-radius: 12px;
+  padding: 18px;
+}
+h2 { margin: 0 0 12px; font-size: 16px; color: var(--azul); }
+
+/* ---------- cuentas ---------- */
+#lista-cuentas { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+#lista-cuentas li {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 12px; border-radius: 9px; border: 1px solid var(--borde);
+  cursor: pointer; transition: background .15s;
+}
+#lista-cuentas li:hover { background: var(--azul-claro); }
+#lista-cuentas li.sel { background: var(--azul); color: #fff; border-color: var(--azul); }
+#lista-cuentas li span:last-child { font-variant-numeric: tabular-nums; font-weight: 600; }
+.nueva { margin-top: 14px; }
+.nueva summary { color: var(--azul); cursor: pointer; font-weight: 600; }
+#form-cuenta { display: grid; gap: 8px; margin-top: 10px; }
+#form-cuenta input { padding: 8px 10px; border: 1px solid var(--borde); border-radius: 8px; }
+#form-cuenta button { padding: 8px; border: 0; border-radius: 8px; background: var(--azul); color: #fff; }
+.msg-chico { margin: 0; font-size: 13px; min-height: 1em; }
+
+/* ---------- saldo ---------- */
+.saldo-card {
+  background: linear-gradient(135deg, var(--azul) 0%, #2d6aa3 100%);
+  color: #fff; border: 0;
+}
+.saldo-card h1 { margin: 2px 0 12px; font-size: 24px; }
+.etiqueta { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; opacity: .8; }
+.saldo { margin: 2px 0 0; font-size: 40px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* ---------- operación ---------- */
+.operacion label { font-weight: 600; display: block; margin-bottom: 6px; }
+.fila-monto { display: flex; align-items: center; border: 2px solid var(--borde); border-radius: 10px; overflow: hidden; }
+.fila-monto:focus-within { border-color: var(--azul); }
+.prefijo { padding: 0 12px; color: var(--suave); font-weight: 600; }
+.fila-monto input { flex: 1; border: 0; outline: 0; padding: 12px 10px 12px 0; font-size: 22px; min-width: 0; }
+.rapidos { display: flex; gap: 8px; margin: 10px 0; flex-wrap: wrap; }
+.rapidos button {
+  border: 1px solid var(--borde); background: #fff; border-radius: 20px; padding: 5px 14px; color: var(--azul);
+}
+.rapidos button:hover { background: var(--azul-claro); }
+.botones { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.btn { border: 0; border-radius: 10px; padding: 13px; color: #fff; font-weight: 700; font-size: 16px; }
+.btn.chico { padding: 8px 16px; font-size: 14px; }
+.btn.retiro { background: var(--granate); }
+.btn.retiro:hover { background: var(--granate-osc); }
+.btn.abono { background: var(--verde); }
+.btn.abono:hover { background: #256628; }
+.btn:disabled { opacity: .6; cursor: wait; }
+.ayuda { color: var(--suave); font-size: 13px; margin: 10px 0 0; }
+
+/* ---------- resultado ---------- */
+.resultado { border-radius: 12px; padding: 14px 18px; border-left: 6px solid; font-size: 15px; }
+.resultado.oculto { display: none; }
+.resultado b { display: block; font-size: 16px; margin-bottom: 2px; }
+.resultado.EXITOSA { background: var(--verde-claro); border-color: var(--verde); }
+.resultado.RECHAZADA { background: var(--naranja-claro); border-color: var(--naranja); }
+.resultado.ERROR, .resultado.FALLA { background: var(--rojo-claro); border-color: var(--rojo); }
+
+/* ---------- tablas ---------- */
+.tabla-scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th {
+  text-align: left; background: var(--azul-claro); color: var(--azul);
+  padding: 8px 10px; font-weight: 600; white-space: nowrap;
+}
+td { padding: 8px 10px; border-bottom: 1px solid var(--borde); white-space: nowrap; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.msg { white-space: normal; color: var(--suave); min-width: 200px; }
+.vacio { color: var(--suave); text-align: center; padding: 18px; }
+.chip { display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 12px; font-weight: 700; }
+.chip.EXITOSA, .chip.OK { background: var(--verde-claro); color: var(--verde); }
+.chip.RECHAZADA { background: var(--naranja-claro); color: var(--naranja); }
+.chip.ERROR, .chip.FALLA, .chip.PENDIENTE { background: var(--rojo-claro); color: var(--rojo); }
+.chip.OMITIDO { background: #eee; color: #777; }
+.tipo-RETIRO { color: var(--granate); font-weight: 600; }
+.tipo-ABONO { color: var(--verde); font-weight: 600; }
+
+/* ---------- historial ---------- */
+.cab-historial { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.cab-historial h2 { margin: 0; }
+#filtro-titular { padding: 7px 10px; border: 1px solid var(--borde); border-radius: 8px; }
+.resumen-estados { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.resumen-estados div { padding: 8px 14px; border-radius: 10px; font-size: 14px; }
+.resumen-estados strong { font-size: 18px; margin-right: 4px; }
+
+/* ---------- BDD ---------- */
+#bdd-resumen { margin: 14px 0; }
+.bdd-total { font-size: 18px; font-weight: 700; color: var(--verde); }
+.bdd-total.mal { color: var(--rojo); }
+.feature-titulo { margin: 18px 0 6px; font-weight: 700; color: var(--granate); }
+.escenario { border: 1px solid var(--borde); border-radius: 10px; margin-bottom: 8px; overflow: hidden; }
+.escenario summary {
+  padding: 9px 12px; cursor: pointer; display: flex; justify-content: space-between; gap: 10px;
+  background: #fafbfc;
+}
+.escenario ul { margin: 0; padding: 8px 14px 10px 14px; list-style: none; }
+.escenario li { font-family: Consolas, "DejaVu Sans Mono", monospace; font-size: 13px; padding: 2px 0; }
+.escenario li .kw { color: var(--azul); font-weight: 700; }
+.escenario li .err { color: var(--rojo); display: block; margin-left: 20px; }
+
+footer { text-align: center; color: var(--suave); font-size: 13px; padding: 20px; }
+
+/* ---------- celular ---------- */
+@media (max-width: 760px) {
+  #vista-cajero.activa { grid-template-columns: minmax(0, 1fr); }
+  .barra { padding: 10px 14px; }
+  .pestanas { width: 100%; }
+  .pestana { flex: 1; padding: 8px 4px; }
+  .saldo { font-size: 32px; }
+  .marca small { display: none; }
+}
