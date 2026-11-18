@@ -68,6 +68,16 @@
 
       <div id="resultado" class="resultado oculto"></div>
 
+      <div class="panel ejemplos">
+        <div class="cab-historial">
+          <h2>Ejemplos rápidos</h2>
+          <button type="button" id="btn-todos" class="btn abono chico">▶ Ejecutar todos</button>
+        </div>
+        <p class="ayuda" style="margin-top:0">Haz clic en un ejemplo para ejecutarlo con la cuenta seleccionada. Cada uno demuestra una regla de negocio.</p>
+        <div id="lista-ejemplos" class="lista-ejemplos"></div>
+        <p id="ej-resumen" class="ayuda"></p>
+      </div>
+
       <div class="panel">
         <h2>Últimos movimientos</h2>
         <div class="tabla-scroll"><table id="tabla-recientes"></table></div>
@@ -102,6 +112,264 @@
 </main>
 
 <footer>Paucar Ventura, Luis Antonio · DSL - UNI FIIS · 2026</footer>
-<script src="app.js"></script>
+<script>
+// Cajero Web - interfaz de prj_withdrawal (consume la API Go en /api/*)
+// Autor: Paucar Ventura, Luis Antonio
+"use strict";
+
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => document.querySelectorAll(s);
+const fmt = (n) => "S/ " + Number(n).toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+let cuentas = [];
+let seleccionada = null;
+let tipoPulsado = "retiro";
+
+async function api(ruta, opciones = {}) {
+  const r = await fetch(ruta, {
+    headers: { "Content-Type": "application/json" },
+    ...opciones,
+  });
+  const datos = await r.json().catch(() => ({}));
+  return { ok: r.ok, status: r.status, datos };
+}
+
+function esc(t) {
+  return String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+// ---------------- cuentas ----------------
+async function cargarCuentas() {
+  const { datos } = await api("/api/cuentas");
+  cuentas = datos;
+  if (!seleccionada && cuentas.length) seleccionada = cuentas[0].titular;
+  pintarCuentas();
+  pintarFiltro();
+}
+
+function pintarCuentas() {
+  const ul = $("#lista-cuentas");
+  ul.innerHTML = cuentas
+    .map((c) => `<li data-t="${esc(c.titular)}" class="${c.titular === seleccionada ? "sel" : ""}">
+                   <span>${esc(c.titular)}</span><span>${fmt(c.saldo)}</span></li>`)
+    .join("");
+  ul.querySelectorAll("li").forEach((li) =>
+    li.addEventListener("click", () => {
+      seleccionada = li.dataset.t;
+      $("#resultado").className = "resultado oculto";
+      pintarCuentas();
+      cargarRecientes();
+    })
+  );
+  const c = cuentas.find((x) => x.titular === seleccionada);
+  $("#titular-sel").textContent = c ? c.titular : "-";
+  $("#saldo-sel").textContent = fmt(c ? c.saldo : 0);
+}
+
+function pintarFiltro() {
+  const sel = $("#filtro-titular");
+  const actual = sel.value;
+  sel.innerHTML = '<option value="">Todos los titulares</option>' +
+    cuentas.map((c) => `<option>${esc(c.titular)}</option>`).join("");
+  sel.value = actual;
+}
+
+$("#form-cuenta").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const titular = $("#nc-titular").value.trim();
+  const saldo = parseFloat($("#nc-saldo").value);
+  const { ok, datos } = await api("/api/cuentas", { method: "POST", body: JSON.stringify({ titular, saldo }) });
+  const msg = $("#nc-msg");
+  if (!ok) {
+    msg.style.color = "var(--rojo)";
+    msg.textContent = datos.error || "No se pudo crear";
+    return;
+  }
+  msg.style.color = "var(--verde)";
+  msg.textContent = "Cuenta creada";
+  seleccionada = titular;
+  $("#resultado").className = "resultado oculto";
+  e.target.reset();
+  await cargarCuentas();
+  cargarRecientes();
+});
+
+// ---------------- operaciones ----------------
+$$(".rapidos button").forEach((b) => b.addEventListener("click", () => { $("#monto").value = b.dataset.m; $("#monto").focus(); }));
+$$(".botones .btn").forEach((b) => b.addEventListener("click", () => { tipoPulsado = b.dataset.tipo; }));
+
+async function ejecutarOperacion(tipo, monto) {
+  $$(".botones .btn, .ejemplos button").forEach((b) => (b.disabled = true));
+  const r = await api("/api/operaciones", {
+    method: "POST",
+    body: JSON.stringify({ titular: seleccionada, tipo, monto }),
+  });
+  $$(".botones .btn, .ejemplos button").forEach((b) => (b.disabled = false));
+  mostrarResultado(r.ok, r.status, r.datos);
+  await cargarCuentas();
+  cargarRecientes();
+  return r;
+}
+
+$("#form-op").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!seleccionada) return;
+  const monto = parseFloat($("#monto").value);
+  if (Number.isNaN(monto)) return;
+  const { datos } = await ejecutarOperacion(tipoPulsado, monto);
+  if (datos.transaccion && datos.transaccion.estado === "EXITOSA") $("#monto").value = "";
+});
+
+// ---------------- ejemplos rápidos ----------------
+// Cada ejemplo muestra una regla de negocio con la cuenta seleccionada.
+const EJEMPLOS = [
+  { regla: "RN-01", titulo: "Retiro válido", tipo: "retiro", monto: () => 50, espera: "EXITOSA",
+    desc: "Retira S/ 50.00: hay saldo suficiente." },
+  { regla: "RN-02", titulo: "Retiro mayor al saldo", tipo: "retiro", monto: (s) => Math.round((s + 100) * 100) / 100, espera: "RECHAZADA",
+    desc: "Intenta retirar S/ 100 más de lo que hay." },
+  { regla: "—", titulo: "Abono válido", tipo: "abono", monto: () => 120.5, espera: "EXITOSA",
+    desc: "Abona S/ 120.50 a la cuenta." },
+  { regla: "RN-05", titulo: "Abono sobre el límite", tipo: "abono", monto: () => 6000, espera: "RECHAZADA",
+    desc: "Abona S/ 6,000.00 (máximo S/ 5,000.00)." },
+  { regla: "RN-04", titulo: "Monto cero", tipo: "retiro", monto: () => 0, espera: "ERROR",
+    desc: "Retira S/ 0.00: el monto debe ser mayor que cero." },
+  { regla: "RN-07", titulo: "Tres decimales", tipo: "abono", monto: () => 10.555, espera: "ERROR",
+    desc: "Abona S/ 10.555: solo se aceptan 2 decimales." },
+];
+
+function saldoActual() {
+  const c = cuentas.find((x) => x.titular === seleccionada);
+  return c ? Number(c.saldo) : 0;
+}
+
+async function correrEjemplo(i) {
+  if (!seleccionada) return null;
+  const ej = EJEMPLOS[i];
+  const monto = ej.monto(saldoActual());
+  $("#monto").value = monto;
+  const { datos } = await ejecutarOperacion(ej.tipo, monto);
+  const estado = datos.transaccion ? datos.transaccion.estado : "ERROR";
+  const card = $(`.ejemplo[data-i="${i}"] .obtenido`);
+  card.className = "obtenido chip " + estado;
+  card.textContent = (estado === ej.espera ? "✓ " : "✗ ") + estado;
+  return estado === ej.espera;
+}
+
+function pintarEjemplos() {
+  $("#lista-ejemplos").innerHTML = EJEMPLOS.map((ej, i) => `
+    <button type="button" class="ejemplo" data-i="${i}">
+      <span class="ej-cab"><span class="ej-regla">${ej.regla}</span><span class="tipo-${ej.tipo.toUpperCase()}">${ej.tipo.toUpperCase()}</span></span>
+      <strong>${ej.titulo}</strong>
+      <span class="ej-desc">${ej.desc}</span>
+      <span class="ej-pie">Esperado: <span class="chip ${ej.espera}">${ej.espera}</span> <span class="obtenido"></span></span>
+    </button>`).join("");
+  $$(".ejemplo").forEach((b) => b.addEventListener("click", () => correrEjemplo(Number(b.dataset.i))));
+}
+
+$("#btn-todos").addEventListener("click", async () => {
+  $$(".ejemplo .obtenido").forEach((o) => { o.className = "obtenido"; o.textContent = ""; });
+  let bien = 0;
+  for (let i = 0; i < EJEMPLOS.length; i++) {
+    if (await correrEjemplo(i)) bien++;
+    await new Promise((r) => setTimeout(r, 450)); // pausa para que se vea cada paso
+  }
+  $("#ej-resumen").textContent = `${bien} de ${EJEMPLOS.length} ejemplos dieron el resultado esperado. Revisa la pestaña Historial para ver el log.`;
+});
+pintarEjemplos();
+
+function mostrarResultado(ok, status, d) {
+  const div = $("#resultado");
+  let clase, titulo, texto;
+  if (!ok && !d.transaccion) {
+    clase = "ERROR"; titulo = "Error " + status; texto = d.error || "";
+  } else if (status === 500) {
+    clase = "ERROR"; titulo = "Operación revertida"; texto = d.error;
+  } else {
+    const t = d.transaccion;
+    clase = t.estado;
+    const op = t.tipo === "RETIRO" ? "Retiro" : "Abono";
+    titulo = { EXITOSA: `${op} exitoso`, RECHAZADA: `${op} rechazado`, ERROR: "Monto inválido" }[t.estado];
+    texto = t.estado === "EXITOSA"
+      ? `${op} de ${fmt(t.monto)} realizado. Nuevo saldo: ${fmt(t.saldo_final)}`
+      : `${t.mensaje}. El saldo no cambió (${fmt(t.saldo_final)}).`;
+    texto += ` <span style="opacity:.7">· ${t.id}</span>`;
+  }
+  div.className = "resultado " + clase;
+  div.innerHTML = `<b>${esc(titulo)}</b>${texto}`;
+}
+
+// ---------------- tablas ----------------
+function filas(lista, conTitular) {
+  if (!lista.length) return `<tr><td class="vacio" colspan="9">Sin movimientos todavía</td></tr>`;
+  return lista.map((t) => `<tr>
+      <td>${t.id}</td><td>${t.fecha}</td>${conTitular ? `<td>${esc(t.titular)}</td>` : ""}
+      <td class="tipo-${t.tipo}">${t.tipo}</td>
+      <td class="num">${fmt(t.monto)}</td><td class="num">${fmt(t.saldo_anterior)}</td><td class="num">${fmt(t.saldo_final)}</td>
+      <td><span class="chip ${t.estado}">${t.estado}</span></td><td class="msg">${esc(t.mensaje)}</td></tr>`).join("");
+}
+
+function cabecera(conTitular) {
+  return `<tr><th>ID</th><th>Fecha</th>${conTitular ? "<th>Titular</th>" : ""}<th>Tipo</th><th>Monto</th>
+          <th>Saldo antes</th><th>Saldo después</th><th>Estado</th><th>Mensaje</th></tr>`;
+}
+
+async function cargarRecientes() {
+  if (!seleccionada) return;
+  const { datos } = await api("/api/transacciones?titular=" + encodeURIComponent(seleccionada));
+  $("#tabla-recientes").innerHTML = cabecera(false) + filas(datos.slice(0, 6), false);
+}
+
+async function cargarHistorial() {
+  const t = $("#filtro-titular").value;
+  const { datos } = await api("/api/transacciones" + (t ? "?titular=" + encodeURIComponent(t) : ""));
+  $("#tabla-historial").innerHTML = cabecera(true) + filas(datos, true);
+  const cuenta = (e) => datos.filter((x) => x.estado === e).length;
+  $("#resumen-estados").innerHTML = `
+    <div class="chip EXITOSA"><strong>${cuenta("EXITOSA")}</strong>exitosas</div>
+    <div class="chip RECHAZADA"><strong>${cuenta("RECHAZADA")}</strong>rechazadas</div>
+    <div class="chip ERROR"><strong>${cuenta("ERROR")}</strong>con error</div>`;
+}
+$("#filtro-titular").addEventListener("change", cargarHistorial);
+
+// ---------------- BDD ----------------
+async function correrBDD() {
+  const btn = $("#btn-bdd");
+  btn.disabled = true;
+  btn.textContent = "Ejecutando...";
+  const { ok, datos } = await api("/api/bdd");
+  btn.disabled = false;
+  btn.textContent = "Ejecutar pruebas";
+  if (!ok) { $("#bdd-resumen").textContent = datos.error; return; }
+  const bien = datos.pasaron === datos.total;
+  $("#bdd-resumen").innerHTML = `<span class="bdd-total ${bien ? "" : "mal"}">${datos.pasaron} de ${datos.total} escenarios pasaron</span>
+     <span class="ayuda"> · ${datos.pasos_ok}/${datos.pasos_total} pasos OK</span>`;
+  let html = "", feat = "";
+  for (const e of datos.escenarios) {
+    if (e.feature !== feat) { feat = e.feature; html += `<div class="feature-titulo">Feature: ${esc(feat)}</div>`; }
+    html += `<details class="escenario" ${e.paso ? "" : "open"}>
+      <summary><span>Scenario: ${esc(e.nombre)}</span><span class="chip ${e.paso ? "OK" : "FALLA"}">${e.paso ? "PASÓ" : "FALLÓ"}</span></summary>
+      <ul>${e.pasos.map((p) => {
+        const [kw, ...resto] = p.texto.split(" ");
+        return `<li><span class="chip ${p.estado}">${p.estado}</span> <span class="kw">${kw}</span> ${esc(resto.join(" "))}
+                ${p.error ? `<span class="err">→ ${esc(p.error)}</span>` : ""}</li>`;
+      }).join("")}</ul></details>`;
+  }
+  $("#bdd-lista").innerHTML = html;
+}
+$("#btn-bdd").addEventListener("click", correrBDD);
+
+// ---------------- pestañas ----------------
+$$(".pestana").forEach((b) =>
+  b.addEventListener("click", () => {
+    $$(".pestana").forEach((x) => x.classList.toggle("activa", x === b));
+    $$(".vista").forEach((v) => v.classList.toggle("activa", v.id === "vista-" + b.dataset.vista));
+    if (b.dataset.vista === "historial") cargarHistorial();
+    if (b.dataset.vista === "bdd" && !$("#bdd-lista").innerHTML) correrBDD();
+  })
+);
+
+cargarCuentas().then(cargarRecientes);
+
+</script>
 </body>
 </html>

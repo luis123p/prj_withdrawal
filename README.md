@@ -76,7 +76,7 @@ prj_withdrawal/
 │   ├── runner.go  pasos.go  bdd_test.go
 ├── web/                  API HTTP + interfaz (HTML/CSS/JS embebidos)
 │   ├── servidor.go  servidor_test.go
-│   └── static/  index.html  estilos.css  app.js
+│   └── static/  index.html (con el JavaScript incluido)  estilos.css
 ├── features/             01-retiro-cash, 02-abono-cash, 03-transaccion-log
 └── data/                 cuentas.json (el log se crea al usar la app)
 ```

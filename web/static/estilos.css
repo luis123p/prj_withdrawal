@@ -166,6 +166,21 @@ td.msg { white-space: normal; color: var(--suave); min-width: 200px; }
 .escenario li .kw { color: var(--azul); font-weight: 700; }
 .escenario li .err { color: var(--rojo); display: block; margin-left: 20px; }
 
+/* ---------- ejemplos rápidos ---------- */
+.lista-ejemplos { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-top: 12px; }
+.ejemplo {
+  display: flex; flex-direction: column; gap: 4px; text-align: left;
+  background: #fff; border: 1px solid var(--borde); border-radius: 10px; padding: 12px; color: var(--texto);
+  transition: border-color .15s, background .15s;
+}
+.ejemplo:hover { border-color: var(--azul); background: var(--azul-claro); }
+.ejemplo:disabled { opacity: .6; cursor: wait; }
+.ej-cab { display: flex; justify-content: space-between; font-size: 12px; }
+.ej-regla { color: var(--suave); font-weight: 700; }
+.ej-desc { color: var(--suave); font-size: 13px; }
+.ej-pie { font-size: 12px; color: var(--suave); margin-top: 4px; }
+#ej-resumen { font-weight: 600; color: var(--azul); }
+
 footer { text-align: center; color: var(--suave); font-size: 13px; padding: 20px; }
 
 /* ---------- celular ---------- */
