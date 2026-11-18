@@ -3,16 +3,20 @@ package banco
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
+	"unicode/utf8"
 )
 
 var (
-	ErrCuentaNoExiste = errors.New("la cuenta no existe")
-	ErrCuentaExiste   = errors.New("la cuenta ya existe")
-	ErrTitularVacio   = errors.New("el titular no puede estar vacío")
+	ErrCuentaNoExiste  = errors.New("la cuenta no existe")
+	ErrCuentaExiste    = errors.New("la cuenta ya existe")
+	ErrTitularVacio    = errors.New("el titular no puede estar vacío")
+	ErrTitularInvalido = errors.New("el titular debe tener de 1 a 30 caracteres: letras, números, espacios, punto, guion o apóstrofo")
 )
 
 // Banco agrupa las cuentas y la bitácora. Lo usan la CLI y la app web.
@@ -71,11 +75,30 @@ func NuevoBanco(datos []DatoCuenta, log Bitacora) (*Banco, error) {
 	return b, nil
 }
 
-// AbrirCuenta crea una cuenta nueva con un saldo inicial.
-func (b *Banco) AbrirCuenta(titular string, saldo float64) error {
+// MaxTitular es el largo máximo del nombre del titular (en caracteres).
+const MaxTitular = 30
+
+// Letras (con ñ y tildes), números, espacios, punto, guion y apóstrofo.
+var titularValido = regexp.MustCompile(`^[\p{L}\p{M}\p{N} .'’-]+$`)
+
+// ValidarTitular limpia los espacios de los extremos y revisa el nombre.
+func ValidarTitular(titular string) (string, error) {
 	titular = strings.TrimSpace(titular)
-	if titular == "" {
-		return ErrTitularVacio
+	switch {
+	case titular == "":
+		return "", ErrTitularVacio
+	case utf8.RuneCountInString(titular) > MaxTitular || !titularValido.MatchString(titular):
+		return "", ErrTitularInvalido
+	}
+	return titular, nil
+}
+
+// AbrirCuenta crea una cuenta nueva con un saldo inicial. La apertura queda
+// en el log como transacción APERTURA, así la cuenta se conserva al reiniciar.
+func (b *Banco) AbrirCuenta(titular string, saldo float64) error {
+	titular, err := ValidarTitular(titular)
+	if err != nil {
+		return err
 	}
 	m, err := NuevoMonto(saldo)
 	if err != nil {
@@ -88,6 +111,14 @@ func (b *Banco) AbrirCuenta(titular string, saldo float64) error {
 	defer b.mu.Unlock()
 	if _, ok := b.cuentas[titular]; ok {
 		return ErrCuentaExiste
+	}
+	t, err := nuevaTransaccion(b.log, titular, TipoApertura, saldo, 0)
+	if err != nil {
+		return err
+	}
+	t.SaldoFinal, t.Estado, t.Mensaje = m, EstadoExitosa, "cuenta abierta"
+	if err := b.log.Registrar(t); err != nil {
+		return fmt.Errorf("cuenta no creada, %w: %v", ErrRegistro, err)
 	}
 	b.cuentas[titular] = NewCuenta(titular, m)
 	return nil

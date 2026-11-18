@@ -70,6 +70,8 @@ func TestErroresAPI(t *testing.T) {
 		{"POST", "/api/cuentas", `{"titular":"Alice","saldo":1}`, 409},
 		{"POST", "/api/cuentas", `{"titular":"","saldo":1}`, 400},
 		{"POST", "/api/cuentas", `{"titular":"Luis","saldo":500}`, 201},
+		{"POST", "/api/cuentas", `{"titular":"<img src=x onerror=alert(1)>","saldo":1}`, 400},
+		{"POST", "/api/cuentas", `{"titular":"` + strings.Repeat("x", 300) + `","saldo":1}`, 400},
 		{"GET", "/api/cuentas", ``, 200},
 	}
 	for _, c := range casos {

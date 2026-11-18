@@ -59,3 +59,37 @@ func (m *Monto) UnmarshalJSON(b []byte) error {
 	*m = Monto(math.Round(f * 100))
 	return nil
 }
+
+// MontoEscrito es el monto tal como lo escribió el usuario. Se usa en el log
+// para que un monto inválido (10.555, 0.001, 1e300) quede registrado sin
+// redondear ni desbordar. Si el monto es válido se muestra con 2 decimales.
+type MontoEscrito float64
+
+func (m MontoEscrito) String() string {
+	if c, err := NuevoMonto(float64(m)); err == nil {
+		return c.String()
+	}
+	return strconv.FormatFloat(float64(m), 'g', -1, 64)
+}
+
+// NaN e Infinito no existen en JSON: se guardan como texto ("NaN", "+Inf").
+func (m MontoEscrito) MarshalJSON() ([]byte, error) {
+	f := float64(m)
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return []byte(strconv.Quote(m.String())), nil
+	}
+	return []byte(m.String()), nil
+}
+
+func (m *MontoEscrito) UnmarshalJSON(b []byte) error {
+	s := string(b)
+	if u, err := strconv.Unquote(s); err == nil {
+		s = u
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return err
+	}
+	*m = MontoEscrito(f)
+	return nil
+}

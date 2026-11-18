@@ -11,8 +11,9 @@ import (
 
 // Tipos y estados (modelo de contexto OCL del codeLAB + iteración 3).
 const (
-	TipoRetiro = "RETIRO"
-	TipoAbono  = "ABONO"
+	TipoRetiro   = "RETIRO"
+	TipoAbono    = "ABONO"
+	TipoApertura = "APERTURA" // alta de una cuenta nueva con su saldo inicial
 
 	EstadoExitosa   = "EXITOSA"
 	EstadoRechazada = "RECHAZADA"
@@ -21,15 +22,15 @@ const (
 
 // Transaccion es un registro del historial.
 type Transaccion struct {
-	ID            string `json:"id"`
-	Fecha         string `json:"fecha"`
-	Titular       string `json:"titular"`
-	Tipo          string `json:"tipo"`
-	Monto         Monto  `json:"monto"`
-	SaldoAnterior Monto  `json:"saldo_anterior"`
-	SaldoFinal    Monto  `json:"saldo_final"`
-	Estado        string `json:"estado"`
-	Mensaje       string `json:"mensaje"`
+	ID            string       `json:"id"`
+	Fecha         string       `json:"fecha"`
+	Titular       string       `json:"titular"`
+	Tipo          string       `json:"tipo"`
+	Monto         MontoEscrito `json:"monto"` // tal como lo escribió el usuario
+	SaldoAnterior Monto        `json:"saldo_anterior"`
+	SaldoFinal    Monto        `json:"saldo_final"`
+	Estado        string       `json:"estado"`
+	Mensaje       string       `json:"mensaje"`
 }
 
 // Bitacora guarda y lista transacciones.

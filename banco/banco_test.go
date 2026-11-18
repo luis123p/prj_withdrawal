@@ -3,8 +3,11 @@
 package banco
 
 import (
+	"errors"
+	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -144,5 +147,77 @@ func TestConcurrencia(t *testing.T) {
 	h, _ := b.Historial("")
 	if s != M(1000) || len(h) != 100 {
 		t.Fatalf("saldo=%s registros=%d; esperado 1000.00 y 100", s, len(h))
+	}
+}
+
+// Una cuenta nueva sin movimientos se conserva al reiniciar (transacción APERTURA).
+func TestAperturaSeConserva(t *testing.T) {
+	ruta := filepath.Join(t.TempDir(), "t.json")
+	datos, _ := CargarCuentas("")
+	b, _ := NuevoBanco(datos, NewBitacoraJSON(ruta))
+	if err := b.AbrirCuenta("  Luis ", 500); err != nil {
+		t.Fatal(err)
+	}
+	b2, _ := NuevoBanco(datos, NewBitacoraJSON(ruta))
+	if s, err := b2.Saldo("Luis"); err != nil || s != M(500) {
+		t.Fatalf("Luis tras reiniciar: saldo=%s err=%v", s, err)
+	}
+	h, _ := b2.Historial("Luis")
+	if len(h) != 1 || h[0].Tipo != TipoApertura || h[0].Estado != EstadoExitosa || h[0].SaldoFinal != M(500) {
+		t.Fatalf("historial: %+v", h)
+	}
+}
+
+// Si la apertura no se puede registrar, la cuenta no se crea.
+func TestAperturaSinRegistro(t *testing.T) {
+	b, _ := NuevoBanco(nil, &BitacoraMemoria{Falla: true})
+	if err := b.AbrirCuenta("Luis", 500); !errors.Is(err, ErrRegistro) {
+		t.Fatalf("esperado ErrRegistro, obtenido %v", err)
+	}
+	if _, err := b.Saldo("Luis"); err != ErrCuentaNoExiste {
+		t.Fatal("la cuenta no debía crearse")
+	}
+}
+
+// El log guarda el monto tal como se escribió, también si es inválido.
+func TestMontoEscritoEnLog(t *testing.T) {
+	ruta := filepath.Join(t.TempDir(), "t.json")
+	b, _ := NuevoBanco([]DatoCuenta{{"Alice", M(100)}}, NewBitacoraJSON(ruta))
+	casos := []struct {
+		monto float64
+		texto string
+	}{{1e300, "1e+300"}, {10.555, "10.555"}, {0.001, "0.001"}, {-1e300, "-1e+300"}, {20, "20.00"}, {math.NaN(), "NaN"}}
+	for _, c := range casos {
+		if _, err := b.Abonar("Alice", c.monto); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, _ := os.ReadFile(ruta)
+	h, err := NewBitacoraJSON(ruta).Listar() // el JSON sigue siendo válido
+	if err != nil {
+		t.Fatalf("%v\n%s", err, raw)
+	}
+	for i, c := range casos {
+		if h[i].Monto.String() != c.texto {
+			t.Errorf("monto %v se guardó como %s, esperado %s", c.monto, h[i].Monto, c.texto)
+		}
+	}
+	if s, _ := b.Saldo("Alice"); s != M(120) {
+		t.Fatalf("saldo = %s, esperado 120.00", s)
+	}
+}
+
+func TestValidarTitular(t *testing.T) {
+	validos := []string{"Luis", "María José", "Peña", "O'Brien", "Ana-Lucía", "Jr. Pérez", "Cliente 2", strings.Repeat("ñ", 30)}
+	for _, n := range validos {
+		if _, err := ValidarTitular(n); err != nil {
+			t.Errorf("%q debería ser válido: %v", n, err)
+		}
+	}
+	invalidos := []string{strings.Repeat("x", 31), strings.Repeat("a", 300), `<img src=x onerror=alert(1)>`, "Luis;DROP", "a\tb", "Lu\nis"}
+	for _, n := range invalidos {
+		if _, err := ValidarTitular(n); err != ErrTitularInvalido && err != ErrTitularVacio {
+			t.Errorf("%q debería ser inválido, obtenido %v", n, err)
+		}
 	}
 }

@@ -142,6 +142,7 @@ td.msg { white-space: normal; color: var(--suave); min-width: 200px; }
 .chip.OMITIDO { background: #eee; color: #777; }
 .tipo-RETIRO { color: var(--granate); font-weight: 600; }
 .tipo-ABONO { color: var(--verde); font-weight: 600; }
+.tipo-APERTURA { color: #2c5d8a; font-weight: 600; }
 
 /* ---------- historial ---------- */
 .cab-historial { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }

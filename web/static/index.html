@@ -31,7 +31,8 @@
       <details class="nueva">
         <summary>+ Nueva cuenta</summary>
         <form id="form-cuenta">
-          <input id="nc-titular" placeholder="Titular" maxlength="20" required>
+          <input id="nc-titular" placeholder="Titular" maxlength="30" required
+                 title="De 1 a 30 caracteres: letras, números, espacios, punto, guion o apóstrofo">
           <input id="nc-saldo" type="number" step="0.01" min="0" placeholder="Saldo inicial" required>
           <button type="submit">Crear</button>
           <p id="nc-msg" class="msg-chico"></p>
@@ -223,8 +224,11 @@ $("#form-op").addEventListener("submit", async (e) => {
 // ---------------- ejemplos rápidos ----------------
 // Cada ejemplo muestra una regla de negocio con la cuenta seleccionada.
 const EJEMPLOS = [
-  { regla: "RN-01", titulo: "Retiro válido", tipo: "retiro", monto: () => 50, espera: "EXITOSA",
-    desc: "Retira S/ 50.00: hay saldo suficiente." },
+  // Retira 50; si hay menos de 50, la mitad del saldo (en céntimos, mínimo 0.01).
+  { regla: "RN-01", titulo: "Retiro válido", tipo: "retiro", espera: "EXITOSA",
+    monto: (s) => { const c = Math.round(s * 100); return c >= 5000 ? 50 : Math.max(1, Math.floor(c / 2)) / 100; },
+    omitir: (s) => Math.round(s * 100) < 1,
+    desc: "Retira S/ 50.00 (o la mitad del saldo si hay menos): hay saldo suficiente." },
   { regla: "RN-02", titulo: "Retiro mayor al saldo", tipo: "retiro", monto: (s) => Math.round((s + 100) * 100) / 100, espera: "RECHAZADA",
     desc: "Intenta retirar S/ 100 más de lo que hay." },
   { regla: "—", titulo: "Abono válido", tipo: "abono", monto: () => 120.5, espera: "EXITOSA",
@@ -245,11 +249,17 @@ function saldoActual() {
 async function correrEjemplo(i) {
   if (!seleccionada) return null;
   const ej = EJEMPLOS[i];
-  const monto = ej.monto(saldoActual());
+  const card = $(`.ejemplo[data-i="${i}"] .obtenido`);
+  const saldo = saldoActual();
+  if (ej.omitir && ej.omitir(saldo)) { // con saldo 0 no hay retiro que pueda salir bien
+    card.className = "obtenido chip OMITIDO";
+    card.textContent = "— omitido (sin saldo)";
+    return null;
+  }
+  const monto = ej.monto(saldo);
   $("#monto").value = monto;
   const { datos } = await ejecutarOperacion(ej.tipo, monto);
   const estado = datos.transaccion ? datos.transaccion.estado : "ERROR";
-  const card = $(`.ejemplo[data-i="${i}"] .obtenido`);
   card.className = "obtenido chip " + estado;
   card.textContent = (estado === ej.espera ? "✓ " : "✗ ") + estado;
   return estado === ej.espera;
@@ -268,12 +278,15 @@ function pintarEjemplos() {
 
 $("#btn-todos").addEventListener("click", async () => {
   $$(".ejemplo .obtenido").forEach((o) => { o.className = "obtenido"; o.textContent = ""; });
-  let bien = 0;
+  let bien = 0, omitidos = 0;
   for (let i = 0; i < EJEMPLOS.length; i++) {
-    if (await correrEjemplo(i)) bien++;
+    const r = await correrEjemplo(i);
+    if (r === null) omitidos++;
+    else if (r) bien++;
     await new Promise((r) => setTimeout(r, 450)); // pausa para que se vea cada paso
   }
-  $("#ej-resumen").textContent = `${bien} de ${EJEMPLOS.length} ejemplos dieron el resultado esperado. Revisa la pestaña Historial para ver el log.`;
+  const nota = omitidos ? ` (${omitidos} omitido${omitidos > 1 ? "s" : ""} por falta de saldo)` : "";
+  $("#ej-resumen").textContent = `${bien} de ${EJEMPLOS.length - omitidos} ejemplos dieron el resultado esperado${nota}. Revisa la pestaña Historial para ver el log.`;
 });
 pintarEjemplos();
 
@@ -299,12 +312,20 @@ function mostrarResultado(ok, status, d) {
 }
 
 // ---------------- tablas ----------------
+// El log guarda el monto tal como se escribió: si no es un monto válido
+// (10.555, 0.001, 1e300) se muestra sin redondear.
+function fmtMonto(m) {
+  const n = Number(m);
+  const valido = Number.isFinite(n) && Math.abs(n) <= 1e8 && Math.abs(n * 100 - Math.round(n * 100)) < 1e-6;
+  return valido ? fmt(n) : "S/ " + esc(String(m));
+}
+
 function filas(lista, conTitular) {
   if (!lista.length) return `<tr><td class="vacio" colspan="9">Sin movimientos todavía</td></tr>`;
   return lista.map((t) => `<tr>
       <td>${t.id}</td><td>${t.fecha}</td>${conTitular ? `<td>${esc(t.titular)}</td>` : ""}
       <td class="tipo-${t.tipo}">${t.tipo}</td>
-      <td class="num">${fmt(t.monto)}</td><td class="num">${fmt(t.saldo_anterior)}</td><td class="num">${fmt(t.saldo_final)}</td>
+      <td class="num">${fmtMonto(t.monto)}</td><td class="num">${fmt(t.saldo_anterior)}</td><td class="num">${fmt(t.saldo_final)}</td>
       <td><span class="chip ${t.estado}">${t.estado}</span></td><td class="msg">${esc(t.mensaje)}</td></tr>`).join("");
 }
 

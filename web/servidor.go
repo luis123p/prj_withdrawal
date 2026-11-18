@@ -73,6 +73,8 @@ func (s *Servidor) abrirCuenta(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, banco.ErrCuentaExiste):
 		responderError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, banco.ErrRegistro):
+		responderError(w, http.StatusInternalServerError, err.Error())
 	case err != nil:
 		responderError(w, http.StatusBadRequest, err.Error())
 	default:

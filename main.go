@@ -142,10 +142,15 @@ func cajeroCLI(b *banco.Banco, nombre string) {
 	}
 	if _, err := b.Saldo(nombre); err != nil {
 		s, err := strconv.ParseFloat(leer("Cuenta nueva. Saldo inicial: "), 64)
-		if err != nil || b.AbrirCuenta(nombre, s) != nil {
-			fmt.Println("No se pudo crear la cuenta.")
+		if err != nil {
+			fmt.Println("No se pudo crear la cuenta: saldo inválido (escriba solo números).")
 			return
 		}
+		if err := b.AbrirCuenta(nombre, s); err != nil {
+			fmt.Println("No se pudo crear la cuenta:", err)
+			return
+		}
+		nombre = strings.TrimSpace(nombre)
 	}
 	for {
 		fmt.Printf("\n===== CAJERO - %s =====\n", nombre)
