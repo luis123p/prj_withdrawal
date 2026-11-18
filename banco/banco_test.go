@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestNuevoMonto(t *testing.T) {
@@ -133,20 +134,26 @@ func TestCuentas(t *testing.T) {
 }
 
 // Muchas operaciones en paralelo no deben perder dinero ni registros.
+// Los retiros son de S/ 10 (RN-09) y suman 500, por debajo del límite diario (RN-10).
 func TestConcurrencia(t *testing.T) {
 	ruta := filepath.Join(t.TempDir(), "t.json")
 	b, _ := NuevoBanco([]DatoCuenta{{"Alice", M(1000)}}, NewBitacoraJSON(ruta))
 	var wg sync.WaitGroup
 	for i := 0; i < 50; i++ {
 		wg.Add(2)
-		go func() { defer wg.Done(); b.Abonar("Alice", 1) }()
-		go func() { defer wg.Done(); b.Retirar("Alice", 1) }()
+		go func() { defer wg.Done(); b.Abonar("Alice", 10) }()
+		go func() { defer wg.Done(); b.Retirar("Alice", 10) }()
 	}
 	wg.Wait()
 	s, _ := b.Saldo("Alice")
 	h, _ := b.Historial("")
 	if s != M(1000) || len(h) != 100 {
 		t.Fatalf("saldo=%s registros=%d; esperado 1000.00 y 100", s, len(h))
+	}
+	for _, tx := range h {
+		if tx.Estado != EstadoExitosa {
+			t.Fatalf("todas debían ser EXITOSA: %+v", tx)
+		}
 	}
 }
 
@@ -214,10 +221,213 @@ func TestValidarTitular(t *testing.T) {
 			t.Errorf("%q debería ser válido: %v", n, err)
 		}
 	}
-	invalidos := []string{strings.Repeat("x", 31), strings.Repeat("a", 300), `<img src=x onerror=alert(1)>`, "Luis;DROP", "a\tb", "Lu\nis"}
+	invalidos := []string{strings.Repeat("x", 31), strings.Repeat("a", 300), `<img src=x onerror=alert(1)>`, "Luis;DROP",
+		"-Luis", ".Luis", "'Luis", "’Luis", " - Luis"}
 	for _, n := range invalidos {
-		if _, err := ValidarTitular(n); err != ErrTitularInvalido && err != ErrTitularVacio {
+		if _, err := ValidarTitular(n); err != ErrTitularInvalido {
 			t.Errorf("%q debería ser inválido, obtenido %v", n, err)
+		}
+	}
+	for _, n := range []string{"", "   ", "\t\n"} {
+		if _, err := ValidarTitular(n); err != ErrTitularVacio {
+			t.Errorf("%q debería dar ErrTitularVacio, obtenido %v", n, err)
+		}
+	}
+	// Los espacios se normalizan: extremos fuera y repetidos reducidos a uno.
+	normalizados := map[string]string{"  Ana   Paula ": "Ana Paula", "Ana\tPaula": "Ana Paula", "Lu\nis": "Lu is", "1 Luis": "1 Luis"}
+	for in, want := range normalizados {
+		if got, err := ValidarTitular(in); err != nil || got != want {
+			t.Errorf("ValidarTitular(%q) = %q, %v; esperado %q", in, got, err, want)
+		}
+	}
+	// 30 caracteres después de normalizar es válido aunque la entrada sea más larga.
+	if _, err := ValidarTitular("  " + strings.Repeat("a", 15) + "    " + strings.Repeat("b", 14) + "  "); err != nil {
+		t.Errorf("30 caracteres normalizados debería ser válido: %v", err)
+	}
+}
+
+// "Ana  Paula" y "Ana Paula" son la misma cuenta; " Alice " encuentra a "Alice".
+func TestTitularNormalizado(t *testing.T) {
+	b, _ := NuevoBanco([]DatoCuenta{{"Alice", M(100)}}, &BitacoraMemoria{})
+	if err := b.AbrirCuenta("Ana  Paula", 50); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.AbrirCuenta("Ana Paula", 50); err != ErrCuentaExiste {
+		t.Fatalf("esperado ErrCuentaExiste, obtenido %v", err)
+	}
+	if err := b.AbrirCuenta("-Luis", 50); err != ErrTitularInvalido {
+		t.Fatalf("esperado ErrTitularInvalido, obtenido %v", err)
+	}
+	if s, err := b.Saldo(" Ana   Paula "); err != nil || s != M(50) {
+		t.Fatalf("Saldo(\" Ana   Paula \") = %s, %v", s, err)
+	}
+	tx, err := b.Retirar(" Alice ", 10)
+	if err != nil || tx.Titular != "Alice" || tx.Estado != EstadoExitosa {
+		t.Fatalf("retiro de \" Alice \": %+v, %v", tx, err)
+	}
+	if s, _ := b.Saldo("Alice"); s != M(90) {
+		t.Fatalf("saldo de Alice = %s, esperado 90.00", s)
+	}
+	if h, _ := b.Historial("  Alice"); len(h) != 1 {
+		t.Fatalf("Historial(\"  Alice\") = %d registros, esperado 1", len(h))
+	}
+}
+
+// fijarReloj fija banco.Reloj en una fecha y la restaura al terminar la prueba.
+func fijarReloj(t *testing.T, fecha string) {
+	t.Helper()
+	antes := Reloj
+	t.Cleanup(func() { Reloj = antes })
+	f, err := time.ParseInLocation("2006-01-02 15:04", fecha, time.Local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	Reloj = func() time.Time { return f }
+}
+
+// retiroPrevio simula un retiro ya registrado en el log.
+func retiroPrevio(titular, fecha string, monto float64, estado string) Transaccion {
+	return Transaccion{Titular: titular, Tipo: TipoRetiro, Fecha: fecha + " 09:00:00", Monto: MontoEscrito(monto), Estado: estado}
+}
+
+// RN-09: el cajero solo entrega billetes, en múltiplos de S/ 10.
+func TestRetiroMultiploDe10(t *testing.T) {
+	const msg = "el monto a retirar debe ser múltiplo de S/ 10.00"
+	for _, m := range []float64{25, 15, 0.5, 105, 9.99, 10.01} {
+		c := NewCuenta("T", M(500))
+		tx, _ := Ejecutar(c, &BitacoraMemoria{}, TipoRetiro, m)
+		if tx.Estado != EstadoError || tx.Mensaje != msg || c.Saldo() != M(500) {
+			t.Errorf("retiro %v: %s %q saldo=%s", m, tx.Estado, tx.Mensaje, c.Saldo())
+		}
+	}
+	for _, m := range []float64{10, 20, 100, 500} {
+		c := NewCuenta("T", M(500))
+		if tx, _ := Ejecutar(c, &BitacoraMemoria{}, TipoRetiro, m); tx.Estado != EstadoExitosa {
+			t.Errorf("retiro %v: %s %q", m, tx.Estado, tx.Mensaje)
+		}
+	}
+	// El abono no cambia: puede ser cualquier monto con 2 decimales.
+	c := NewCuenta("T", M(500))
+	if tx, _ := Ejecutar(c, &BitacoraMemoria{}, TipoAbono, 25.5); tx.Estado != EstadoExitosa {
+		t.Errorf("abono 25.50: %s %q", tx.Estado, tx.Mensaje)
+	}
+}
+
+// Orden: monto > 0, 2 decimales, múltiplo de 10, límite diario y por último saldo.
+func TestOrdenValidacionRetiro(t *testing.T) {
+	fijarReloj(t, "2026-11-17 10:00")
+	casos := []struct {
+		monto  float64
+		estado string
+		msg    string
+	}{
+		{-10.555, EstadoError, "el monto a retirar debe ser mayor que cero"},
+		{0, EstadoError, "el monto a retirar debe ser mayor que cero"},
+		{10.555, EstadoError, "el monto solo puede tener hasta 2 decimales"},
+		{25, EstadoError, "el monto a retirar debe ser múltiplo de S/ 10.00"},
+		{2010, EstadoError, "excede el límite diario de retiro (S/ 2000.00; disponible hoy: S/ 2000.00)"},
+		{30, EstadoRechazada, "saldo insuficiente"},
+	}
+	for _, c := range casos {
+		cta := NewCuenta("T", M(20)) // poco saldo: los errores previos van antes que RECHAZADA
+		log := &BitacoraMemoria{}
+		tx, err := Ejecutar(cta, log, TipoRetiro, c.monto)
+		if err != nil || tx.Estado != c.estado || tx.Mensaje != c.msg || cta.Saldo() != M(20) || len(log.Items) != 1 {
+			t.Errorf("retiro %v: %s %q (registros=%d, err=%v)", c.monto, tx.Estado, tx.Mensaje, len(log.Items), err)
+		}
+	}
+}
+
+// RN-10: máximo S/ 2000.00 por día y titular, sumando solo los retiros EXITOSA.
+func TestLimiteDiario(t *testing.T) {
+	fijarReloj(t, "2026-11-17 10:00")
+	c, log := NewCuenta("Ana", M(5000)), &BitacoraMemoria{}
+	for _, m := range []float64{1000, 900, 100} { // llega justo a 2000
+		if tx, _ := Ejecutar(c, log, TipoRetiro, m); tx.Estado != EstadoExitosa {
+			t.Fatalf("retiro %v: %s %q", m, tx.Estado, tx.Mensaje)
+		}
+	}
+	tx, _ := Ejecutar(c, log, TipoRetiro, 10)
+	want := "excede el límite diario de retiro (S/ 2000.00; disponible hoy: S/ 0.00)"
+	if tx.Estado != EstadoError || tx.Mensaje != want || c.Saldo() != M(3000) {
+		t.Fatalf("retiro sobre el límite: %s %q saldo=%s", tx.Estado, tx.Mensaje, c.Saldo())
+	}
+	// El abono no tiene límite diario.
+	if tx, _ := Ejecutar(c, log, TipoAbono, 100); tx.Estado != EstadoExitosa {
+		t.Fatalf("abono: %s %q", tx.Estado, tx.Mensaje)
+	}
+}
+
+func TestLimiteDiarioDisponible(t *testing.T) {
+	fijarReloj(t, "2026-11-17 10:00")
+	c := NewCuenta("Ana", M(5000))
+	log := &BitacoraMemoria{Items: []Transaccion{retiroPrevio("Ana", "2026-11-17", 1900, EstadoExitosa)}}
+	tx, _ := Ejecutar(c, log, TipoRetiro, 200)
+	want := "excede el límite diario de retiro (S/ 2000.00; disponible hoy: S/ 100.00)"
+	if tx.Estado != EstadoError || tx.Mensaje != want || c.Saldo() != M(5000) {
+		t.Fatalf("%s %q saldo=%s", tx.Estado, tx.Mensaje, c.Saldo())
+	}
+}
+
+// Un acumulado de 2000.01 ya supera el límite (p. ej. un retiro de 1990.01 de antes de RN-09).
+func TestLimiteDiarioAcumulado200001(t *testing.T) {
+	fijarReloj(t, "2026-11-17 10:00")
+	c := NewCuenta("Ana", M(5000))
+	log := &BitacoraMemoria{Items: []Transaccion{retiroPrevio("Ana", "2026-11-17", 1990.01, EstadoExitosa)}}
+	tx, _ := Ejecutar(c, log, TipoRetiro, 10)
+	want := "excede el límite diario de retiro (S/ 2000.00; disponible hoy: S/ 9.99)"
+	if tx.Estado != EstadoError || tx.Mensaje != want {
+		t.Fatalf("%s %q", tx.Estado, tx.Mensaje)
+	}
+}
+
+// No cuentan: retiros RECHAZADA o ERROR, abonos, otros titulares ni otros días.
+func TestLimiteDiarioSoloCuentaExitosasDeHoy(t *testing.T) {
+	fijarReloj(t, "2026-11-17 10:00")
+	abono := retiroPrevio("Ana", "2026-11-17", 1500, EstadoExitosa)
+	abono.Tipo = TipoAbono
+	log := &BitacoraMemoria{Items: []Transaccion{
+		retiroPrevio("Ana", "2026-11-17", 1500, EstadoRechazada),
+		retiroPrevio("Ana", "2026-11-17", 1500, EstadoError),
+		retiroPrevio("Ana", "2026-11-16", 2000, EstadoExitosa),
+		retiroPrevio("Beto", "2026-11-17", 2000, EstadoExitosa),
+		abono,
+	}}
+	c := NewCuenta("Ana", M(5000))
+	if tx, _ := Ejecutar(c, log, TipoRetiro, 2000); tx.Estado != EstadoExitosa {
+		t.Fatalf("%s %q", tx.Estado, tx.Mensaje)
+	}
+}
+
+// Al cambiar de día el límite se reinicia.
+func TestLimiteDiarioSeReinicia(t *testing.T) {
+	ruta := filepath.Join(t.TempDir(), "t.json")
+	b, _ := NuevoBanco([]DatoCuenta{{"Ana", M(5000)}}, NewBitacoraJSON(ruta))
+	fijarReloj(t, "2026-11-17 23:59")
+	if tx, _ := b.Retirar("Ana", 2000); tx.Estado != EstadoExitosa {
+		t.Fatalf("día 1: %s %q", tx.Estado, tx.Mensaje)
+	}
+	if tx, _ := b.Retirar("Ana", 10); tx.Estado != EstadoError {
+		t.Fatalf("día 1 sobre el límite: %s %q", tx.Estado, tx.Mensaje)
+	}
+	fijarReloj(t, "2026-11-18 00:00")
+	if tx, _ := b.Retirar("Ana", 2000); tx.Estado != EstadoExitosa {
+		t.Fatalf("día 2: %s %q", tx.Estado, tx.Mensaje)
+	}
+	if s, _ := b.Saldo("Ana"); s != M(1000) {
+		t.Fatalf("saldo = %s, esperado 1000.00", s)
+	}
+}
+
+// El listado de cuentas informa cuánto puede retirar hoy cada titular.
+func TestCuentasDisponibleHoy(t *testing.T) {
+	fijarReloj(t, "2026-11-17 10:00")
+	b, _ := NuevoBanco([]DatoCuenta{{"Ana", M(5000)}, {"Beto", M(10)}}, &BitacoraMemoria{})
+	b.Retirar("Ana", 1500)
+	for _, c := range b.Cuentas() {
+		want := map[string]Monto{"Ana": M(500), "Beto": M(2000)}[c.Titular]
+		if c.DisponibleHoy != want {
+			t.Errorf("%s: disponible hoy %s, esperado %s", c.Titular, c.DisponibleHoy, want)
 		}
 	}
 }

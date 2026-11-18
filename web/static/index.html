@@ -46,6 +46,7 @@
         <h1 id="titular-sel">-</h1>
         <p class="etiqueta">Saldo disponible</p>
         <p class="saldo" id="saldo-sel">S/ 0.00</p>
+        <p class="etiqueta" id="disp-sel"></p>
       </div>
 
       <form class="panel operacion" id="form-op">
@@ -64,7 +65,7 @@
           <button type="submit" class="btn retiro" data-tipo="retiro">Retirar</button>
           <button type="submit" class="btn abono" data-tipo="abono">Abonar</button>
         </div>
-        <p class="ayuda">Límite de abono por operación: S/ 5,000.00 · Montos con hasta 2 decimales.</p>
+        <p class="ayuda">Retiros en múltiplos de S/ 10 (máx. S/ 2,000 por día) · Abono máx. S/ 5,000 por operación · hasta 2 decimales</p>
       </form>
 
       <div id="resultado" class="resultado oculto"></div>
@@ -165,6 +166,7 @@ function pintarCuentas() {
   const c = cuentas.find((x) => x.titular === seleccionada);
   $("#titular-sel").textContent = c ? c.titular : "-";
   $("#saldo-sel").textContent = fmt(c ? c.saldo : 0);
+  $("#disp-sel").textContent = c ? "Puede retirar hoy: " + fmt(c.disponible_hoy) + " de S/ 2,000.00" : "";
 }
 
 function pintarFiltro() {
@@ -223,14 +225,25 @@ $("#form-op").addEventListener("submit", async (e) => {
 
 // ---------------- ejemplos rápidos ----------------
 // Cada ejemplo muestra una regla de negocio con la cuenta seleccionada.
+// Cada función recibe s = saldo y d = lo que aún se puede retirar hoy (RN-10).
+// omitir devuelve el motivo si con esa cuenta el ejemplo no puede dar lo esperado.
+const piso10 = (x) => Math.floor(Math.round(x * 100) / 1000) * 10; // mayor múltiplo de 10 <= x
 const EJEMPLOS = [
-  // Retira 50; si hay menos de 50, la mitad del saldo (en céntimos, mínimo 0.01).
+  // 50, o el mayor múltiplo de 10 que permitan el saldo y el límite diario.
   { regla: "RN-01", titulo: "Retiro válido", tipo: "retiro", espera: "EXITOSA",
-    monto: (s) => { const c = Math.round(s * 100); return c >= 5000 ? 50 : Math.max(1, Math.floor(c / 2)) / 100; },
-    omitir: (s) => Math.round(s * 100) < 1,
-    desc: "Retira S/ 50.00 (o la mitad del saldo si hay menos): hay saldo suficiente." },
-  { regla: "RN-02", titulo: "Retiro mayor al saldo", tipo: "retiro", monto: (s) => Math.round((s + 100) * 100) / 100, espera: "RECHAZADA",
-    desc: "Intenta retirar S/ 100 más de lo que hay." },
+    monto: (s, d) => Math.min(50, piso10(s), piso10(d)),
+    omitir: (s, d) => piso10(s) < 10 ? "saldo menor que S/ 10" : piso10(d) < 10 ? "ya llegó al límite diario" : "",
+    desc: "Retira S/ 50.00 (o el mayor múltiplo de 10 que alcance): hay saldo suficiente." },
+  // El menor múltiplo de 10 mayor que el saldo; debe caber en el límite diario.
+  { regla: "RN-02", titulo: "Retiro mayor al saldo", tipo: "retiro", espera: "RECHAZADA",
+    monto: (s) => piso10(s) + 10,
+    omitir: (s, d) => s >= 2000 ? "con saldo de S/ 2,000 o más no hay retiro mayor al saldo dentro del límite diario"
+      : piso10(s) + 10 > d ? "lo que queda del límite diario no alcanza" : "",
+    desc: "Intenta retirar un múltiplo de S/ 10 mayor que el saldo (sin pasar de S/ 2,000)." },
+  { regla: "RN-09", titulo: "Retiro no múltiplo de 10", tipo: "retiro", monto: () => 25, espera: "ERROR",
+    desc: "Retira S/ 25.00: el cajero solo entrega billetes de S/ 10 o más." },
+  { regla: "RN-10", titulo: "Supera el límite diario", tipo: "retiro", monto: () => 2010, espera: "ERROR",
+    desc: "Retira S/ 2,010.00: el máximo por día es S/ 2,000.00." },
   { regla: "—", titulo: "Abono válido", tipo: "abono", monto: () => 120.5, espera: "EXITOSA",
     desc: "Abona S/ 120.50 a la cuenta." },
   { regla: "RN-05", titulo: "Abono sobre el límite", tipo: "abono", monto: () => 6000, espera: "RECHAZADA",
@@ -241,22 +254,23 @@ const EJEMPLOS = [
     desc: "Abona S/ 10.555: solo se aceptan 2 decimales." },
 ];
 
-function saldoActual() {
+function cuentaActual() {
   const c = cuentas.find((x) => x.titular === seleccionada);
-  return c ? Number(c.saldo) : 0;
+  return { saldo: c ? Number(c.saldo) : 0, disponible: c ? Number(c.disponible_hoy) : 0 };
 }
 
 async function correrEjemplo(i) {
   if (!seleccionada) return null;
   const ej = EJEMPLOS[i];
   const card = $(`.ejemplo[data-i="${i}"] .obtenido`);
-  const saldo = saldoActual();
-  if (ej.omitir && ej.omitir(saldo)) { // con saldo 0 no hay retiro que pueda salir bien
+  const { saldo, disponible } = cuentaActual();
+  const motivo = ej.omitir ? ej.omitir(saldo, disponible) : "";
+  if (motivo) {
     card.className = "obtenido chip OMITIDO";
-    card.textContent = "— omitido (sin saldo)";
+    card.textContent = "— omitido: " + motivo;
     return null;
   }
-  const monto = ej.monto(saldo);
+  const monto = ej.monto(saldo, disponible);
   $("#monto").value = monto;
   const { datos } = await ejecutarOperacion(ej.tipo, monto);
   const estado = datos.transaccion ? datos.transaccion.estado : "ERROR";
@@ -285,7 +299,7 @@ $("#btn-todos").addEventListener("click", async () => {
     else if (r) bien++;
     await new Promise((r) => setTimeout(r, 450)); // pausa para que se vea cada paso
   }
-  const nota = omitidos ? ` (${omitidos} omitido${omitidos > 1 ? "s" : ""} por falta de saldo)` : "";
+  const nota = omitidos ? ` (${omitidos} omitido${omitidos > 1 ? "s" : ""}: no aplica${omitidos > 1 ? "n" : ""} a esta cuenta)` : "";
   $("#ej-resumen").textContent = `${bien} de ${EJEMPLOS.length - omitidos} ejemplos dieron el resultado esperado${nota}. Revisa la pestaña Historial para ver el log.`;
 });
 pintarEjemplos();

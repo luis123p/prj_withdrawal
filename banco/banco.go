@@ -59,17 +59,19 @@ func CargarCuentas(ruta string) ([]DatoCuenta, error) {
 func NuevoBanco(datos []DatoCuenta, log Bitacora) (*Banco, error) {
 	b := &Banco{cuentas: map[string]*Cuenta{}, log: log}
 	for _, d := range datos {
-		b.cuentas[d.Titular] = NewCuenta(d.Titular, d.Saldo)
+		n := NormalizarTitular(d.Titular)
+		b.cuentas[n] = NewCuenta(n, d.Saldo)
 	}
 	hist, err := log.Listar()
 	if err != nil {
 		return nil, err
 	}
 	for _, t := range hist {
-		if c, ok := b.cuentas[t.Titular]; ok {
+		n := NormalizarTitular(t.Titular)
+		if c, ok := b.cuentas[n]; ok {
 			c.saldo = t.SaldoFinal
 		} else {
-			b.cuentas[t.Titular] = NewCuenta(t.Titular, t.SaldoFinal)
+			b.cuentas[n] = NewCuenta(n, t.SaldoFinal)
 		}
 	}
 	return b, nil
@@ -78,12 +80,19 @@ func NuevoBanco(datos []DatoCuenta, log Bitacora) (*Banco, error) {
 // MaxTitular es el largo máximo del nombre del titular (en caracteres).
 const MaxTitular = 30
 
-// Letras (con ñ y tildes), números, espacios, punto, guion y apóstrofo.
-var titularValido = regexp.MustCompile(`^[\p{L}\p{M}\p{N} .'’-]+$`)
+// Empieza con letra o número; luego letras (con ñ y tildes), números,
+// espacios, punto, guion o apóstrofo (RN-08).
+var titularValido = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{M}\p{N} .'’-]*$`)
 
-// ValidarTitular limpia los espacios de los extremos y revisa el nombre.
+// NormalizarTitular recorta los extremos y reduce los espacios repetidos a uno,
+// para que "Ana  Paula" y " Ana Paula " sean la misma cuenta.
+func NormalizarTitular(titular string) string {
+	return strings.Join(strings.Fields(titular), " ")
+}
+
+// ValidarTitular normaliza los espacios y revisa el nombre (RN-08).
 func ValidarTitular(titular string) (string, error) {
-	titular = strings.TrimSpace(titular)
+	titular = NormalizarTitular(titular)
 	switch {
 	case titular == "":
 		return "", ErrTitularVacio
@@ -112,10 +121,11 @@ func (b *Banco) AbrirCuenta(titular string, saldo float64) error {
 	if _, ok := b.cuentas[titular]; ok {
 		return ErrCuentaExiste
 	}
-	t, err := nuevaTransaccion(b.log, titular, TipoApertura, saldo, 0)
+	lista, err := b.log.Listar()
 	if err != nil {
-		return err
+		return fmt.Errorf("no se puede abrir la cuenta: %w", err)
 	}
+	t := nuevaTransaccion(lista, titular, TipoApertura, saldo, 0)
 	t.SaldoFinal, t.Estado, t.Mensaje = m, EstadoExitosa, "cuenta abierta"
 	if err := b.log.Registrar(t); err != nil {
 		return fmt.Errorf("cuenta no creada, %w: %v", ErrRegistro, err)
@@ -128,7 +138,7 @@ func (b *Banco) AbrirCuenta(titular string, saldo float64) error {
 func (b *Banco) Operar(titular, tipo string, monto float64) (Transaccion, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	c, ok := b.cuentas[titular]
+	c, ok := b.cuentas[NormalizarTitular(titular)]
 	if !ok {
 		return Transaccion{}, ErrCuentaNoExiste
 	}
@@ -147,20 +157,28 @@ func (b *Banco) Abonar(titular string, monto float64) (Transaccion, error) {
 func (b *Banco) Saldo(titular string) (Monto, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	c, ok := b.cuentas[titular]
+	c, ok := b.cuentas[NormalizarTitular(titular)]
 	if !ok {
 		return 0, ErrCuentaNoExiste
 	}
 	return c.Saldo(), nil
 }
 
+// EstadoCuenta es una cuenta con su saldo y lo que aún puede retirar hoy (RN-10).
+type EstadoCuenta struct {
+	Titular       string `json:"titular"`
+	Saldo         Monto  `json:"saldo"`
+	DisponibleHoy Monto  `json:"disponible_hoy"`
+}
+
 // Cuentas devuelve todas las cuentas ordenadas por titular.
-func (b *Banco) Cuentas() []DatoCuenta {
+func (b *Banco) Cuentas() []EstadoCuenta {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	out := make([]DatoCuenta, 0, len(b.cuentas))
+	lista, _ := b.log.Listar() // si el log no se puede leer, Operar lo informará
+	out := make([]EstadoCuenta, 0, len(b.cuentas))
 	for _, c := range b.cuentas {
-		out = append(out, DatoCuenta{Titular: c.titular, Saldo: c.saldo})
+		out = append(out, EstadoCuenta{Titular: c.titular, Saldo: c.saldo, DisponibleHoy: disponibleHoy(lista, c.titular)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Titular < out[j].Titular })
 	return out
@@ -172,9 +190,10 @@ func (b *Banco) Historial(titular string) ([]Transaccion, error) {
 	if err != nil {
 		return nil, err
 	}
+	titular = NormalizarTitular(titular)
 	out := []Transaccion{}
 	for i := len(lista) - 1; i >= 0; i-- {
-		if titular == "" || lista[i].Titular == titular {
+		if titular == "" || NormalizarTitular(lista[i].Titular) == titular {
 			out = append(out, lista[i])
 		}
 	}

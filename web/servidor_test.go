@@ -100,3 +100,53 @@ func TestPaginaYBDD(t *testing.T) {
 		t.Fatalf("bdd: %s", rec.Body.String())
 	}
 }
+
+// " Alice " encuentra la cuenta "Alice" al operar y al pedir el historial.
+func TestTitularNormalizadoAPI(t *testing.T) {
+	s := nuevoServidor(t, &banco.BitacoraMemoria{})
+	rec, m := pedir(t, s, "POST", "/api/operaciones", `{"titular":"  Alice ","tipo":"retiro","monto":10}`)
+	tx, _ := m["transaccion"].(map[string]any)
+	if rec.Code != 200 || tx["estado"] != "EXITOSA" || tx["titular"] != "Alice" || m["saldo"] != 224.56 {
+		t.Fatalf("retiro de \"  Alice \": %d %s", rec.Code, rec.Body.String())
+	}
+	rec, _ = pedir(t, s, "GET", "/api/transacciones?titular=%20Alice%20%20", "")
+	var h []banco.Transaccion
+	json.Unmarshal(rec.Body.Bytes(), &h)
+	if len(h) != 1 || h[0].Titular != "Alice" {
+		t.Fatalf("historial de \" Alice  \": %s", rec.Body.String())
+	}
+	if rec, _ := pedir(t, s, "POST", "/api/cuentas", `{"titular":"-Luis","saldo":1}`); rec.Code != 400 {
+		t.Fatalf("\"-Luis\" debía dar 400: %d", rec.Code)
+	}
+}
+
+// RN-09 y RN-10 por la API, y el disponible de hoy en /api/cuentas.
+func TestReglasRetiroAPI(t *testing.T) {
+	s := nuevoServidor(t, &banco.BitacoraMemoria{})
+	casos := []struct {
+		cuerpo, estado, mensaje string
+	}{
+		{`{"titular":"Alice","tipo":"retiro","monto":25}`, "ERROR", "el monto a retirar debe ser múltiplo de S/ 10.00"},
+		{`{"titular":"Alice","tipo":"retiro","monto":2010}`, "ERROR", "excede el límite diario de retiro (S/ 2000.00; disponible hoy: S/ 2000.00)"},
+		{`{"titular":"Alice","tipo":"retiro","monto":50}`, "EXITOSA", "operación realizada"},
+	}
+	for _, c := range casos {
+		_, m := pedir(t, s, "POST", "/api/operaciones", c.cuerpo)
+		tx, _ := m["transaccion"].(map[string]any)
+		if tx["estado"] != c.estado || tx["mensaje"] != c.mensaje {
+			t.Errorf("%s -> %v", c.cuerpo, m)
+		}
+	}
+	rec, _ := pedir(t, s, "GET", "/api/cuentas", "")
+	var cuentas []map[string]any
+	json.Unmarshal(rec.Body.Bytes(), &cuentas)
+	for _, c := range cuentas {
+		want := 2000.0
+		if c["titular"] == "Alice" {
+			want = 1950
+		}
+		if c["disponible_hoy"] != want {
+			t.Errorf("%v: disponible_hoy=%v, esperado %v", c["titular"], c["disponible_hoy"], want)
+		}
+	}
+}

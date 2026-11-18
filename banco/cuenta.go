@@ -5,13 +5,25 @@ import (
 	"fmt"
 )
 
-// LimiteAbono es el monto máximo por operación de abono (RN-05).
-const LimiteAbono = Monto(5000_00)
+const (
+	// LimiteAbono es el monto máximo por operación de abono (RN-05).
+	LimiteAbono = Monto(5000_00)
+	// DenominacionMinima: el cajero solo entrega billetes, el menor es de S/ 10 (RN-09).
+	DenominacionMinima = Monto(10_00)
+	// LimiteDiarioRetiro es lo máximo que un titular puede retirar por día (RN-10).
+	LimiteDiarioRetiro = Monto(2000_00)
+)
 
 var (
 	ErrRetiroNoPositivo = errors.New("el monto a retirar debe ser mayor que cero")
 	ErrAbonoNoPositivo  = errors.New("el monto a abonar debe ser mayor que cero")
+	ErrNoMultiplo       = errors.New("el monto a retirar debe ser múltiplo de S/ " + DenominacionMinima.String())
 )
+
+// ErrLimiteDiario arma el mensaje de RN-10 con lo que aún se puede retirar hoy.
+func ErrLimiteDiario(disponible Monto) error {
+	return fmt.Errorf("excede el límite diario de retiro (S/ %s; disponible hoy: S/ %s)", LimiteDiarioRetiro, disponible)
+}
 
 // Cuenta es la entidad de negocio de los features Gherkin.
 type Cuenta struct {

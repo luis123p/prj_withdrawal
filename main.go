@@ -18,6 +18,7 @@ import (
 	"embed"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
@@ -70,11 +71,11 @@ func main() {
 
 	switch {
 	case *historial:
-		imprimirHistorial(b, *nombre)
+		imprimirHistorial(os.Stdout, b, *nombre)
 	case *op != "":
-		os.Exit(operacion(b, *op, *nombre, *monto))
+		os.Exit(operacion(os.Stdout, b, *op, *nombre, *monto))
 	case *interactivo:
-		cajeroCLI(b, *nombre)
+		cajeroCLI(b, *nombre, os.Stdin, os.Stdout)
 	default:
 		dir := "localhost:" + *puerto
 		fmt.Println("==============================================")
@@ -87,97 +88,138 @@ func main() {
 	}
 }
 
-func mostrar(t banco.Transaccion, err error) {
+func mostrar(w io.Writer, t banco.Transaccion, err error) {
 	switch {
 	case err != nil && t.ID == "":
-		fmt.Println("ERROR:", err)
+		fmt.Fprintln(w, "ERROR:", err)
 	case err != nil:
-		fmt.Printf("[%s] ERROR: %v\n", t.ID, err)
+		fmt.Fprintf(w, "[%s] ERROR: %v\n", t.ID, err)
 	case t.Estado == banco.EstadoExitosa:
-		fmt.Printf("[%s] %s exitoso. Nuevo saldo: %s\n", t.ID, strings.ToLower(t.Tipo), t.SaldoFinal)
+		fmt.Fprintf(w, "[%s] %s exitoso. Nuevo saldo: %s\n", t.ID, strings.ToLower(t.Tipo), t.SaldoFinal)
 	default:
-		fmt.Printf("[%s] %s %s: %s. Saldo: %s\n", t.ID, t.Tipo, t.Estado, t.Mensaje, t.SaldoFinal)
+		fmt.Fprintf(w, "[%s] %s %s: %s. Saldo: %s\n", t.ID, t.Tipo, t.Estado, t.Mensaje, t.SaldoFinal)
 	}
 }
 
-func operacion(b *banco.Banco, op, nombre string, monto float64) int {
+func operacion(w io.Writer, b *banco.Banco, op, nombre string, monto float64) int {
 	tipo := map[string]string{"retiro": banco.TipoRetiro, "abono": banco.TipoAbono}[op]
 	if tipo == "" {
-		fmt.Println("Error: -op debe ser 'retiro' o 'abono'")
+		fmt.Fprintln(w, "Error: -op debe ser 'retiro' o 'abono'")
 		return 1
 	}
-	t, err := b.Operar(nombre, tipo, monto)
-	mostrar(t, err)
+	t, err := b.Operar(banco.NormalizarTitular(nombre), tipo, monto)
+	mostrar(w, t, err)
 	if err != nil {
 		return 1
 	}
 	return 0
 }
 
-func imprimirHistorial(b *banco.Banco, titular string) {
+// Formato de la tabla del historial: el mismo para la cabecera y las filas.
+// TIPO tiene 8 de ancho (APERTURA) y TITULAR 12; los nombres más largos se recortan.
+const (
+	formatoHistorial = "%-8s %-19s %-12s %-8s %12s %12s %12s  %-9s %s\n"
+	anchoTitular     = 12
+)
+
+// recortar deja s en n caracteres como máximo (contando runas, no bytes).
+func recortar(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n-1]) + "…"
+}
+
+func imprimirHistorial(w io.Writer, b *banco.Banco, titular string) {
 	h, err := b.Historial(titular)
 	if err != nil {
-		fmt.Println("Error:", err)
+		fmt.Fprintln(w, "Error:", err)
 		return
 	}
-	fmt.Printf("%-8s %-19s %-8s %-7s %9s %9s %9s  %-9s %s\n",
+	fmt.Fprintf(w, formatoHistorial,
 		"ID", "FECHA", "TITULAR", "TIPO", "MONTO", "S.ANTES", "S.DESPUES", "ESTADO", "MENSAJE")
 	for i := len(h) - 1; i >= 0; i-- { // en orden cronológico
 		t := h[i]
-		fmt.Printf("%-8s %-19s %-8s %-7s %9s %9s %9s  %-9s %s\n",
-			t.ID, t.Fecha, t.Titular, t.Tipo, t.Monto, t.SaldoAnterior, t.SaldoFinal, t.Estado, t.Mensaje)
+		fmt.Fprintf(w, formatoHistorial, t.ID, t.Fecha, recortar(t.Titular, anchoTitular), t.Tipo,
+			t.Monto, t.SaldoAnterior, t.SaldoFinal, t.Estado, t.Mensaje)
 	}
-	fmt.Printf("(%d transacciones)\n", len(h))
+	fmt.Fprintf(w, "(%d transacciones)\n", len(h))
 }
 
-func cajeroCLI(b *banco.Banco, nombre string) {
-	in := bufio.NewReader(os.Stdin)
-	leer := func(p string) string {
-		fmt.Print(p)
-		s, _ := in.ReadString('\n')
-		return strings.TrimSpace(s)
+// cajeroCLI es el cajero interactivo (-i). Solo la opción 5 cierra la sesión;
+// si la entrada se termina (EOF, por ejemplo Ctrl+Z / Ctrl+D) también sale.
+func cajeroCLI(b *banco.Banco, nombre string, entrada io.Reader, w io.Writer) {
+	in := bufio.NewReader(entrada)
+	// leer devuelve false cuando ya no hay nada más que leer.
+	leer := func(p string) (string, bool) {
+		fmt.Fprint(w, p)
+		s, err := in.ReadString('\n')
+		return strings.TrimSpace(s), err == nil || s != ""
 	}
+	fin := func() { fmt.Fprintln(w, "\nSesión finalizada.") }
+
+	nombre = banco.NormalizarTitular(nombre)
 	if nombre == "" {
-		nombre = leer("Nombre del titular: ")
+		var ok bool
+		if nombre, ok = leer("Nombre del titular: "); !ok {
+			fin()
+			return
+		}
+		nombre = banco.NormalizarTitular(nombre)
 	}
 	if _, err := b.Saldo(nombre); err != nil {
-		s, err := strconv.ParseFloat(leer("Cuenta nueva. Saldo inicial: "), 64)
+		txt, ok := leer("Cuenta nueva. Saldo inicial: ")
+		if !ok {
+			fin()
+			return
+		}
+		s, err := strconv.ParseFloat(txt, 64)
 		if err != nil {
-			fmt.Println("No se pudo crear la cuenta: saldo inválido (escriba solo números).")
+			fmt.Fprintln(w, "No se pudo crear la cuenta: saldo inválido (escriba solo números).")
 			return
 		}
 		if err := b.AbrirCuenta(nombre, s); err != nil {
-			fmt.Println("No se pudo crear la cuenta:", err)
+			fmt.Fprintln(w, "No se pudo crear la cuenta:", err)
 			return
 		}
-		nombre = strings.TrimSpace(nombre)
 	}
 	for {
-		fmt.Printf("\n===== CAJERO - %s =====\n", nombre)
-		fmt.Println("1. Retirar  2. Abonar  3. Saldo  4. Mis transacciones  5. Salir")
-		opc := leer("Opción: ")
+		fmt.Fprintf(w, "\n===== CAJERO - %s =====\n", nombre)
+		fmt.Fprintln(w, "1. Retirar  2. Abonar  3. Saldo  4. Mis transacciones  5. Salir")
+		opc, ok := leer("Opción: ")
+		if !ok {
+			fin()
+			return
+		}
 		switch opc {
 		case "1", "2":
-			m, err := strconv.ParseFloat(leer("Monto: "), 64)
+			txt, ok := leer("Monto: ")
+			if !ok {
+				fin()
+				return
+			}
+			m, err := strconv.ParseFloat(txt, 64)
 			if err != nil {
-				fmt.Println("Monto inválido (escriba solo números).")
+				fmt.Fprintln(w, "Monto inválido (escriba solo números).")
 				continue
 			}
 			tipo := banco.TipoRetiro
 			if opc == "2" {
 				tipo = banco.TipoAbono
 			}
-			mostrar(b.Operar(nombre, tipo, m))
+			t, err := b.Operar(nombre, tipo, m)
+			mostrar(w, t, err)
 		case "3":
 			s, _ := b.Saldo(nombre)
-			fmt.Println("Saldo actual:", s)
+			fmt.Fprintln(w, "Saldo actual:", s)
 		case "4":
-			imprimirHistorial(b, nombre)
-		case "5", "":
-			fmt.Println("Sesión finalizada.")
+			imprimirHistorial(w, b, nombre)
+		case "5":
+			fmt.Fprintln(w, "Sesión finalizada.")
 			return
-		default:
-			fmt.Println("Opción no válida.")
+		default: // incluye la opción vacía (Enter)
+			fmt.Fprintln(w, "Opción no válida.")
 		}
 	}
 }

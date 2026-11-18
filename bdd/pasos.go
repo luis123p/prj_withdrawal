@@ -26,6 +26,7 @@ type definicion struct {
 var definiciones = []definicion{
 	{regexp.MustCompile(`^(\w+) has (-?[\d.]+) in their account$`), dadoSaldo},
 	{regexp.MustCompile(`^the transaction log cannot be written$`), dadoLogFalla},
+	{regexp.MustCompile(`^(\w+) has already withdrawn ([\d.]+) today$`), dadoRetiradoHoy},
 	{regexp.MustCompile(`^(\w+) (?:tries to )?(withdraws?|deposits?) (-?[\d.]+)(?: in cash)?$`), cuandoOpera},
 	{regexp.MustCompile(`^the (withdrawal|deposit) is (successful|declined)$`), entoncesResultado},
 	{regexp.MustCompile(`^the balance (?:is|remains) (-?[\d.]+)$`), entoncesSaldo},
@@ -69,6 +70,30 @@ func dadoLogFalla(c *contexto, _ []string) error {
 		return fmt.Errorf("primero debe existir una cuenta")
 	}
 	c.log.Falla = true
+	return nil
+}
+
+// dadoRetiradoHoy deja en el log un retiro EXITOSA de hoy (para RN-10).
+// Solo cuenta para el límite diario: el saldo del escenario no cambia.
+func dadoRetiradoHoy(c *contexto, a []string) error {
+	if c.cuenta == nil || c.cuenta.Titular() != a[0] {
+		return fmt.Errorf("no hay cuenta para %s en este escenario", a[0])
+	}
+	m, err := monto(a[1])
+	if err != nil {
+		return err
+	}
+	c.log.Items = append(c.log.Items, banco.Transaccion{
+		ID:            fmt.Sprintf("TX-%04d", len(c.log.Items)+1),
+		Fecha:         banco.Reloj().Format("2006-01-02 15:04:05"),
+		Titular:       a[0],
+		Tipo:          banco.TipoRetiro,
+		Monto:         banco.MontoEscrito(m.Float()),
+		SaldoAnterior: c.cuenta.Saldo() + m,
+		SaldoFinal:    c.cuenta.Saldo(),
+		Estado:        banco.EstadoExitosa,
+		Mensaje:       "operación realizada",
+	})
 	return nil
 }
 
